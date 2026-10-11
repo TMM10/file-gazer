@@ -1,0 +1,44 @@
+name: Build Windows portable app
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    name: Compile and package
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up packaging Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Build the native executable
+        run: ./backend/build.ps1
+
+      - name: Create and verify the portable ZIP
+        run: python ./tools/package_release.py
+
+      - name: Upload the portable package and checksums
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: FileGazer-Windows-Portable
+          path: |
+            FileGazer-Portable.zip
+            release/package-manifest.json
+          if-no-files-found: error
+          retention-days: 14

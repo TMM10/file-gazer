@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs><linearGradient id="starlight" x1=".2" y1="0" x2=".7" y2="1" gradientUnits="objectBoundingBox"><stop stop-color="#faf7ff"/><stop offset=".5" stop-color="#d1c5ff"/><stop offset="1" stop-color="#8985d5"/></linearGradient></defs>
+  <path d="M29 5C32 22 35 27 53 32C36 35 33 38 29 59C25 39 22 35 5 32C23 27 26 22 29 5Z" fill="url(#starlight)"/>
+  <path d="M53 3C54 8 55 10 61 11C55 12 54 14 53 19C52 14 50 12 45 11C50 10 52 8 53 3Z" fill="#f7edce"/>
+</svg>

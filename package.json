@@ -1,0 +1,23 @@
+{
+  "name": "file-gazer",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Windows visual storage explorer; optional development test dependencies",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node tests/verify_layout.cjs",
+    "test:motion": "node tests/verify_motion.cjs",
+    "test:momentum": "node tests/verify_momentum.cjs",
+    "test:labels": "node tests/singleton-labels.cjs",
+    "test:rendering": "node tests/verify_rendering.cjs",
+    "test:steam": "node tests/verify_steam.cjs",
+    "test:libraries": "node tests/verify_game_libraries.cjs",
+    "test:camera": "node tests/verify_camera.cjs --synthetic-only"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1",
+    "pngjs": "7.0.0"
+  }
+}

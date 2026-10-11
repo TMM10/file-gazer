@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>File Gazer</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div id="app-shell" class="app-shell">
+    <div id="immersive-toolbar" class="immersive-toolbar" role="toolbar" aria-label="Full screen bubble controls" hidden>
+      <div class="immersive-toolbar-start"><button id="immersive-navigation" class="button quiet" aria-label="Show navigation" aria-controls="storage-sidebar" aria-expanded="false"><span data-icon="menu"></span><span class="immersive-tool-label">Navigation</span></button><button id="immersive-up" class="icon-button" aria-label="Go to parent folder" title="Go to parent folder" disabled><span data-icon="up"></span></button><nav id="immersive-breadcrumbs" class="breadcrumbs immersive-breadcrumbs" aria-label="Full screen folder path"></nav></div>
+      <div class="immersive-toolbar-actions"><button id="immersive-contents" class="button quiet" aria-label="Show contents" aria-controls="contents-panel" aria-expanded="false"><span data-icon="layers"></span><span class="immersive-tool-label">Contents</span></button><button id="immersive-menu" class="icon-button" aria-label="Show tools menu" aria-controls="immersive-actions-menu" aria-expanded="false"><span data-icon="more"></span></button><button id="immersive-exit" class="button quiet" aria-label="Exit full screen" title="Exit full screen (Escape)"><span data-icon="collapse"></span><span class="immersive-tool-label">Exit</span></button></div>
+    </div>
+    <aside id="immersive-actions-menu" class="immersive-actions-menu" aria-label="Full screen tools" hidden><label class="search immersive-search"><span data-icon="search"></span><input id="immersive-search-input" type="search" placeholder="Find a file or folder…" aria-label="Search files and folders in full screen"></label><div class="immersive-menu-actions"><button id="immersive-tree" class="button quiet"><span data-icon="folder"></span>Traditional file tree</button><button id="immersive-scan" class="button quiet"><span data-icon="scan"></span>Scan storage</button><button id="immersive-export" class="button quiet" disabled><span data-icon="download"></span>Export inventory</button><button id="immersive-overview" class="button quiet"><span data-icon="grid"></span>Back to overview</button><button id="immersive-info" class="button quiet"><span data-icon="info"></span>About sizes and controls</button></div></aside>
+    <aside id="storage-sidebar" class="sidebar" aria-label="Storage navigation">
+      <a class="brand" href="#" id="home-link" aria-label="File Gazer home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span>File Gazer<small>Explore your file universe.</small></span>
+      </a>
+      <div class="side-caption">EXPLORE</div>
+      <nav class="view-nav" aria-label="View storage by">
+        <button class="nav-item active" data-mode="folders" aria-current="page"><span class="nav-icon" data-icon="folder"></span>Folders</button>
+        <button class="nav-item" data-mode="categories"><span class="nav-icon" data-icon="grid"></span>Categories</button>
+        <button class="nav-item" data-mode="games"><span class="nav-icon" data-icon="game"></span>Games</button>
+        <button class="nav-item" data-mode="types"><span class="nav-icon" data-icon="file"></span>File types</button>
+      </nav>
+      <div class="side-caption drives-caption">YOUR DRIVES <button id="refresh-drives" class="icon-button" title="Refresh available drives" aria-label="Refresh available drives"><span data-icon="refresh"></span></button></div>
+      <div id="drive-list" class="drive-list"><p class="side-muted">Finding your drives…</p></div>
+      <div class="sidebar-footer"><span class="privacy-dot"></span><span>On your PC<small>Local file exploration</small></span><button id="info-button" class="icon-button" aria-label="About scan sizes" title="About scan sizes"><span data-icon="info"></span></button></div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="window-label">A clearer view of your storage</div>
+        <div class="top-actions">
+          <button id="export-button" class="button quiet" disabled><span data-icon="download"></span><span class="optional-label">Export</span></button>
+          <button id="scan-button" class="button primary"><span data-icon="scan"></span>Scan storage</button>
+        </div>
+      </header>
+      <div class="content">
+        <div class="page-heading">
+          <div><div class="eyebrow" id="eyebrow">YOUR SPACE, AT A GLANCE</div><h1 id="page-title">Storage, in perspective.</h1><p class="page-description" id="page-description">See the big picture. Find what takes up space. Follow your curiosity.</p></div>
+          <div class="heading-stat"><strong id="total-size">—</strong><span id="total-caption">ready to explore</span></div>
+        </div>
+        <section id="scan-progress" class="scan-progress" aria-label="Scan progress" hidden>
+          <div class="progress-top"><span class="scan-live"><i></i><strong id="progress-title">Scanning your storage</strong></span><button id="cancel-button" class="button compact">Cancel scan</button></div>
+          <div class="progress-track" aria-hidden="true"><span></span></div>
+          <div class="progress-bottom"><span id="progress-count">Reading file sizes…</span><span id="progress-path" class="truncate"></span></div>
+        </section>
+        <div class="explore-toolbar">
+          <div class="breadcrumb-wrap"><button id="up-button" class="icon-button" title="Go to parent folder" aria-label="Go to parent folder" disabled><span data-icon="up"></span></button><nav id="breadcrumbs" class="breadcrumbs" aria-label="Folder path"></nav></div>
+          <label class="search"><span data-icon="search"></span><input id="search-input" type="search" placeholder="Find a file or folder…" aria-label="Search files and folders"><kbd>/</kbd></label>
+        </div>
+
+        <div id="selection-bar" class="selection-bar" hidden><span id="selection-summary"></span><div class="selection-actions"><button id="copy-selected" class="button compact">Copy paths</button><button id="recycle-selected" class="button compact danger">Move to Recycle Bin</button><button id="clear-selected" class="button compact">Clear</button></div></div>
+        <div class="explorer-grid">
+          <section class="map-panel" aria-labelledby="map-title">
+            <div class="panel-heading"><div><h2 id="map-title">Your drives</h2><span id="map-subtitle">Scan to discover what's inside.</span></div><div class="map-heading-actions"><div id="map-badge" class="subtle-badge">Capacity view</div><button id="fullscreen-button" class="button quiet compact" aria-label="Open bubble view in full screen" title="Open full screen"><span data-icon="expand"></span><span class="fullscreen-label">Full screen</span></button></div></div>
+            <div id="map-stage" class="map-stage"><div class="empty-map"><span class="empty-mark" data-icon="drive"></span><h3>Your storage starts here.</h3><p>Scan your drives to reveal folders, files, categories and games.</p><button class="button primary" id="empty-scan">Scan storage</button></div></div>
+            <div class="map-footer"><span id="map-hint"><span data-icon="mouse"></span>Scroll to zoom · Drag to move · Click to focus</span><div class="map-footer-actions"><button id="file-tree-button" class="text-button" disabled>File tree</button><button id="folder-details" class="text-button" hidden>Folder details</button><button id="reset-view" class="text-button" hidden>Back to overview <span aria-hidden="true">↗</span></button></div></div>
+          </section>
+          <aside id="contents-panel" class="contents-panel" aria-labelledby="contents-title">
+            <div class="panel-heading"><div><h2 id="contents-title">Largest first</h2><span id="contents-subtitle">A closer look at your space.</span></div><span id="item-count" class="count-badge">0</span></div>
+            <div class="list-columns"><span>Name</span><span>Size</span></div>
+            <div id="item-list" class="item-list"><div class="empty-list"><span data-icon="layers"></span><p>Your files and folders will appear here after a scan.</p></div></div>
+            <div id="pagination" class="pagination" hidden><button id="previous-page" class="button compact">Previous</button><span id="page-range"></span><button id="next-page" class="button compact">Next</button></div>
+          </aside>
+        </div>
+        <div id="category-legend" class="category-legend"></div>
+        <div class="status-note"><span data-icon="info"></span><span id="status-note">Scans read file sizes and folder metadata. Your files stay in place.</span><button id="warnings-button" class="text-button" hidden></button></div>
+        <footer class="page-footer"><span>Made for a little more clarity.</span><span id="last-scan">No scan yet</span></footer>
+      </div>
+    </main>
+  <dialog id="scan-dialog" class="dialog scan-dialog" aria-labelledby="scan-dialog-title">
+    <form id="scan-form">
+      <div class="dialog-heading"><span class="dialog-symbol" data-icon="scan"></span><button type="button" class="icon-button close-dialog" aria-label="Close scan settings"><span data-icon="close"></span></button></div>
+      <h2 id="scan-dialog-title">Where should we look?</h2><p>Choose your drives, or explore a specific folder. File Gazer reads sizes and leaves your files in place during a scan.</p>
+      <div id="scan-drive-options" class="scan-drive-options"></div>
+      <label class="field-label" for="custom-path">Or add a folder path</label><input id="custom-path" class="path-input" type="text" placeholder="e.g. D:\Games" autocomplete="off" spellcheck="false"><small class="field-help">Paste a full Windows folder path. You can scan it alongside the selected drives.</small>
+      <p class="form-error" id="scan-error" role="alert" hidden></p>
+      <div class="dialog-actions"><button type="button" class="button close-dialog">Cancel</button><button type="submit" id="start-scan" class="button primary"><span data-icon="scan"></span>Start scan</button></div>
+    </form>
+  </dialog>
+  <dialog id="detail-dialog" class="dialog detail-dialog" aria-labelledby="detail-title">
+    <div class="dialog-heading"><span id="detail-icon" class="dialog-symbol"></span><button class="icon-button close-dialog" aria-label="Close item details"><span data-icon="close"></span></button></div>
+    <div id="detail-category" class="eyebrow">FILE DETAILS</div><h2 id="detail-title"></h2><p id="detail-path" class="detail-path"></p><dl id="detail-stats" class="detail-stats"></dl><div class="dialog-actions"><button id="copy-path" class="button"><span data-icon="copy"></span>Copy path</button><button id="reveal-item" class="button primary"><span data-icon="external"></span>Show in Explorer</button></div>
+  </dialog>
+  <dialog id="info-dialog" class="dialog info-dialog" aria-labelledby="info-title">
+    <div class="dialog-heading"><span class="dialog-symbol" data-icon="info"></span><button class="icon-button close-dialog" aria-label="Close scan information"><span data-icon="close"></span></button></div>
+    <h2 id="info-title">A note about sizes.</h2><p>The map measures logical file sizes: the length of files reported by Windows, added into their parent folders. Twice the bytes means twice the bubble area. Compare siblings within the same folder or group; deeper bubbles use local scales while their parent remains as context.</p><p>Scroll to zoom smoothly around your pointer, drag to move, or click a bubble to bring it into focus. Smaller folders and files emerge as you move closer.</p><p>File sizes can differ from occupied disk space because of compression, sparse files, hard links, protected folders and file-system metadata. Drive bars use Windows' capacity figures.</p><p>Scans skip inaccessible folders and links or junctions. A skipped path does not mean an empty folder. Categories are inferred from location and extension; game names come from launcher manifests or recognizable installation folders.</p><div class="dialog-actions"><button class="button primary close-dialog">Got it</button></div>
+  </dialog>
+  <dialog id="warnings-dialog" class="dialog warnings-dialog" aria-labelledby="warnings-title"><div class="dialog-heading"><span class="dialog-symbol" data-icon="info"></span><button class="icon-button close-dialog" aria-label="Close skipped paths"><span data-icon="close"></span></button></div><h2 id="warnings-title">Paths we couldn't read.</h2><p>The rest of your scan is available. These paths were skipped or changed while scanning.</p><div id="warnings-list" class="warnings-list"></div><div class="dialog-actions"><button class="button primary close-dialog">Done</button></div></dialog>
+  <div id="tooltip" class="map-tooltip" role="tooltip" hidden></div>
+  <div id="context-menu" class="context-menu" role="menu" aria-label="File actions" hidden></div>
+  <dialog id="tree-dialog" class="dialog tree-dialog" aria-labelledby="tree-title">
+    <div class="dialog-heading"><span class="dialog-symbol" data-icon="folder"></span><button class="icon-button close-dialog" aria-label="Close file tree"><span data-icon="close"></span></button></div>
+    <h2 id="tree-title">Your file tree.</h2><p>Folders and files, largest first. Expand a folder to look inside.</p>
+    <div class="tree-toolbar"><span id="tree-selection-label">All scanned locations</span><button id="tree-collapse" class="button compact">Collapse all</button></div>
+    <div id="tree-list" class="tree-list" role="tree" aria-label="Traditional file hierarchy"></div>
+    <div class="tree-actions"><button id="tree-details" class="button" disabled>Storage details</button><button id="tree-focus" class="button primary" disabled>Focus in bubble map</button></div>
+  </dialog>
+  <dialog id="file-action-dialog" class="dialog file-action-dialog" aria-labelledby="file-action-title">
+    <form id="file-action-form"><div class="dialog-heading"><span id="file-action-icon" class="dialog-symbol" data-icon="folder"></span><button type="button" class="icon-button close-dialog" aria-label="Cancel file action"><span data-icon="close"></span></button></div>
+    <h2 id="file-action-title"></h2><p id="file-action-description"></p><p id="file-action-path" class="detail-path"></p>
+    <label id="rename-label" class="field-label" for="rename-input">New name</label><input id="rename-input" class="path-input" type="text" autocomplete="off" spellcheck="false">
+    <p id="file-action-error" class="file-action-error form-error" role="alert" hidden></p><div class="dialog-actions"><button type="button" class="button close-dialog">Cancel</button><button id="file-action-confirm" type="submit" class="button primary">Continue</button></div></form>
+  </dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="screen-reader-status" class="sr-only" role="status" aria-live="polite"></div>
+  </div>
+  <script src="/vendor/d3-hierarchy.min.js"></script>
+  <script src="/bubble-layout.js"></script>
+  <script src="/bubble-camera.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
