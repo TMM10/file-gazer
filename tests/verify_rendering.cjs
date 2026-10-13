@@ -16,15 +16,17 @@ async function stage(browser){
   await page.evaluate(()=>{
     const c=window.StorageAtlasBubbleCamera.create({stage:document.querySelector('#map-stage'),color:()=> '#ffffff',formatBytes:n=>String(n),coalesce:a=>a,fetchChildren:()=>null});window.__renderCamera=c;
     window.__configureRender=options=>{
-      cancelAnimationFrame(c.raf);const count=options.pair?2:1,items=Array.from({length:count},(_,i)=>({name:'Circle '+i,path:'Q:\\Pixel QA\\Circle '+i,kind:'file',category:'Other',size:i?4:1,fileCount:1,folderCount:0}));
-      c.setScene(items,{title:'Raster fixture'},JSON.stringify(options),true);cancelAnimationFrame(c.raf);
+      cancelAnimationFrame(c.raf);c.raf=0;const count=options.pair?2:1,items=Array.from({length:count},(_,i)=>({name:'Circle '+i,path:'Q:\\Pixel QA\\Circle '+i,kind:'file',category:'Other',size:i?4:1,fileCount:1,folderCount:0}));
+      c.setScene(items,{title:'Raster fixture'},JSON.stringify(options),true);cancelAnimationFrame(c.raf);c.raf=0;
       const scale=options.scale,baseX=123.456789,baseY=210.7654321,x=(options.cx??400)-baseX*scale,y=(options.cy??400)-baseY*scale;
       c.camera={x,y,targetX:x,targetY:y,scale,targetScale:scale};
       c.nodes.forEach((n,i)=>{const cx=options.pair?(i?500:230):(options.cx??400),cy=options.cy??400;n.x=n.targetX=(cx-x)/scale;n.y=n.targetY=(cy-y)/scale;n.radius=options.worldRadius*(i?2:1);n.offsetX=n.offsetY=n.velocityX=n.velocityY=n.wobble=n.wobbleVelocity=0;});
-      c.lastFrame=performance.now();c.tick(performance.now());cancelAnimationFrame(c.raf);return window.__renderSnapshot();
+      // This fixture deliberately paints one overridden geometry sample. It
+      // must not inherit an adaptive deadline from the preceding pixel case.
+      c.nextFrameAt=0;c.lastFrame=performance.now();c.tick(performance.now());cancelAnimationFrame(c.raf);c.raf=0;return window.__renderSnapshot();
     };
-    window.__renderSnapshot=()=>{cancelAnimationFrame(c.raf);return{...c.getState(),dom:c.nodes.map(n=>{const m=n.circle.getScreenCTM(),r=n.circle.getAttribute('r'),fill=n.group.querySelector('.bubble-viewport-fill'),paths=[...n.group.querySelectorAll('path')].filter(p=>getComputedStyle(p).display!=='none').map(p=>({class:p.getAttribute('class'),d:p.getAttribute('d')||''}));return{path:n.item.path,r:Number(r),circleVisible:getComputedStyle(n.circle).display!=='none',rimVisible:getComputedStyle(n.rim).display!=='none',paths,matrix:m?{a:m.a,b:m.b,c:m.c,d:m.d,e:m.e,f:m.f}:null,viewportFill:fill?{visible:getComputedStyle(fill).display!=='none',x:Number(fill.getAttribute('x')),y:Number(fill.getAttribute('y')),width:Number(fill.getAttribute('width')),height:Number(fill.getAttribute('height'))}:null};})};};
-    window.__resumeRender=()=>{c.lastFrame=performance.now();c.raf=requestAnimationFrame(time=>c.tick(time));};
+    window.__renderSnapshot=()=>{cancelAnimationFrame(c.raf);c.raf=0;return{...c.getState(),dom:c.nodes.map(n=>{const m=n.circle.getScreenCTM(),r=n.circle.getAttribute('r'),fill=n.group.querySelector('.bubble-viewport-fill'),paths=[...n.group.querySelectorAll('path')].filter(p=>getComputedStyle(p).display!=='none').map(p=>({class:p.getAttribute('class'),d:p.getAttribute('d')||''}));return{path:n.item.path,r:Number(r),circleVisible:getComputedStyle(n.circle).display!=='none',rimVisible:getComputedStyle(n.rim).display!=='none',paths,matrix:m?{a:m.a,b:m.b,c:m.c,d:m.d,e:m.e,f:m.f}:null,viewportFill:fill?{visible:getComputedStyle(fill).display!=='none',x:Number(fill.getAttribute('x')),y:Number(fill.getAttribute('y')),width:Number(fill.getAttribute('width')),height:Number(fill.getAttribute('height'))}:null};})};};
+    window.__resumeRender=()=>{c.lastFrame=performance.now();c.nextFrameAt=0;c.wake('pixel fixture');};
   });
   return {context,page};
 }

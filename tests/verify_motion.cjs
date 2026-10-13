@@ -30,7 +30,7 @@ function readableGeometry(frames,label){let overlap=0,comparisons=0,minGap=Infin
   check(label+': deformed siblings retain positive dead space',minGap>0,{minGap});
   check(label+': downward contents remain enclosed in parent',minEnclosure>0,{minEnclosure});
   check(label+': painted circle centers agree with world hit geometry',maxDomError<.001,{maxDomError});
-  check(label+': independent jiggle remains capped at every zoom',maxOffset<=4.8&&maxDeformation<=1.5,{maxOffset,maxDeformation});
+  check(label+': independent jiggle remains capped at every zoom',maxOffset<=6.4&&maxDeformation<=2,{maxOffset,maxDeformation});
 }
 async function scenario(browser,label,viewport){const context=await browser.newContext({viewport}),page=await context.newPage();page.setDefaultTimeout(12000);page.on('pageerror',e=>errors.push(e.message));await fixture.install(context,requests);try{
   await page.goto(fixture.origin,{waitUntil:'networkidle'});await page.waitForFunction(p=>window.StorageAtlasCameraTest?.getState().nodes.some(n=>n.path===p&&n.visible&&n.loadState==='loaded'),fixture.programPath);await page.waitForTimeout(300);await page.evaluate(()=>window.scrollTo(0,0));

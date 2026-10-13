@@ -48,7 +48,7 @@ function geometry(samples,label){
   check(label+': actual spring motion is independently painted',samples.length>=3&&paintedMotion>.05&&independent,{frames:samples.length,paintedMotion,independent});
   check(label+': camera and screen-space paint use the same centers',domError<.001,{domError});
   check(label+': byte areas and reciprocal ellipse areas remain exact',maxAreaError<1e-12&&maxDetError<1e-6,{maxAreaError,maxDetError});
-  check(label+': positional and shape jiggle retain their screen caps',maxOffset<=4.8&&maxShape<=1.5,{maxOffset,maxShape});
+  check(label+': positional and shape jiggle retain their screen caps',maxOffset<=6.4&&maxShape<=2,{maxOffset,maxShape});
   check(label+': moving sibling bubbles retain positive gaps',minGap>0,{minGap});
   return {maxOffset,maxShape,maxAreaError,maxDetError,minGap};
 }

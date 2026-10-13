@@ -15,10 +15,15 @@ Requires Windows 10 or 11, .NET Framework 4.8 and a current Edge, Chrome or Fire
 - Right-click for Explorer, properties, path copying, rename and confirmed Recycle Bin actions. Shift-click selects multiple items.
 - Mark a folder as a game library: each immediate subfolder becomes its own game entry. Steam and Epic metadata retain their launcher identities.
 - Open recognized Steam installations directly in the Steam library.
+- Recognized Steam game bubbles use library artwork, with a quiet color fallback when a card is unavailable.
+- Smaller siblings sit together in a central cluster. Click or zoom into it to explore them without adding a folder level; surrounding larger bubbles settle while the cluster moves.
+- Bubble motion responds to gesture momentum with slower settling, while the starry background is drawn once for each viewport size.
 
 Each sibling group uses one size scale; nested groups use a local scale inside their parent. Logical bytes can differ from physical disk usage because of compression, sparse files, hard links and protected storage. Linked paths are skipped to prevent loops. Scans are read-only; file changes require choosing an explicit action.
 
 File Gazer runs locally on `127.0.0.1`. Scan results stay in memory until the app exits. Saved game-library choices are specific to the installation. No personal inventory, settings, screenshots or machine data are included in this repository or the portable download. Closing the browser leaves the service running; use **Exit** from the star tray icon to stop it.
+
+Steam artwork uses the local Steam cache first. Missing cards can be fetched from Steam's image servers using the recognized app ID; this does not require signing in to Steam or sending your file inventory. Custom libraries without launcher IDs keep their category colors. Artwork is resized and held in a bounded memory cache.
 
 ## Build on Windows
 
@@ -40,6 +45,12 @@ python tools/package_release.py
 ```
 
 This produces `FileGazer-Portable.zip` from an explicit runtime-only allowlist: the executable, UI assets, third-party license and generic user guide. It excludes source tests, settings, scan exports, reports and captures. Publish the ZIP as a release asset rather than committing it to Git.
+
+To prepare a separate local preview without replacing the shared release ZIP:
+
+```powershell
+python tools/package_release.py --output release/preview/FileGazer-Portable.zip --stage release/preview/FileGazer --manifest release/preview/package-manifest.json
+```
 
 ## Development and tests
 

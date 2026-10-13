@@ -51,6 +51,18 @@ namespace StorageAtlas
         internal int Code;
         internal HttpError(int code, string message) : base(message) { Code = code; }
     }
+    internal sealed class ArtworkData
+    {
+        internal byte[] Bytes;
+        internal string Mime;
+    }
+    internal sealed class ArtworkEntry
+    {
+        internal ArtworkData Data;
+        internal DateTime Expires, Used;
+        internal bool Loading;
+        internal readonly ManualResetEventSlim Ready = new ManualResetEventSlim(false);
+    }
 
     internal static class Program
     {
@@ -75,6 +87,13 @@ namespace StorageAtlas
         static string PortFile;
         static string GameLibrariesFile, SettingsWarning;
         static bool GameLibrariesDirty;
+        static readonly HashSet<string> SteamArtworkRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        static readonly object ArtworkGate = new object(), ShellGate = new object();
+        static readonly Dictionary<string, ArtworkEntry> ArtworkCache = new Dictionary<string, ArtworkEntry>();
+        static readonly SemaphoreSlim ArtworkDownloads = new SemaphoreSlim(4, 4);
+        const int ArtworkLimit = 8 * 1024 * 1024, ArtworkCacheLimit = 32 * 1024 * 1024;
+        static long ArtworkCacheBytes;
+        static Control ShellDispatcher;
 
         [STAThread]
         static int Main(string[] args)
@@ -271,6 +290,13 @@ namespace StorageAtlas
                         using (StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false), 65536, true)) { lock (Gate) WriteExport(writer); writer.Flush(); }
                         return;
                     }
+                    if (req.Path == "/api/game-artwork")
+                    {
+                        ArtworkData artwork = GameArtwork(req);
+                        SendHeader(stream, 200, artwork.Mime, artwork.Bytes.Length, "X-Artwork-Source: Steam library\r\n", "private, max-age=3600");
+                        stream.Write(artwork.Bytes, 0, artwork.Bytes.Length);
+                        return;
+                    }
                     if (req.Path.StartsWith("/api/", StringComparison.Ordinal))
                     {
                         object response = Api(req);
@@ -294,10 +320,10 @@ namespace StorageAtlas
         }
         static void Require(Request req, string method) { if (req.Method != method) throw new HttpError(405, "Use " + method + " for this action."); }
         static void TrySendError(NetworkStream stream, int code, string message) { try { Send(stream, code, "application/json; charset=utf-8", Encoding.UTF8.GetBytes(Serialize(new { error = message }))); } catch { } }
-        static void SendHeader(NetworkStream stream, int code, string mime, long? length, string extra)
+        static void SendHeader(NetworkStream stream, int code, string mime, long? length, string extra, string cacheControl = "no-store")
         {
-            string reason = code == 200 ? "OK" : code == 400 ? "Bad Request" : code == 403 ? "Forbidden" : code == 404 ? "Not Found" : code == 405 ? "Method Not Allowed" : code == 409 ? "Conflict" : code == 413 ? "Payload Too Large" : "Internal Server Error";
-            string header = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: " + mime + "\r\nConnection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n" + (length.HasValue ? "Content-Length: " + length.Value + "\r\n" : "") + extra + "\r\n";
+            string reason = code == 200 ? "OK" : code == 400 ? "Bad Request" : code == 403 ? "Forbidden" : code == 404 ? "Not Found" : code == 405 ? "Method Not Allowed" : code == 409 ? "Conflict" : code == 413 ? "Payload Too Large" : code == 503 ? "Service Unavailable" : "Internal Server Error";
+            string header = "HTTP/1.1 " + code + " " + reason + "\r\nContent-Type: " + mime + "\r\nConnection: close\r\nCache-Control: " + cacheControl + "\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n" + (length.HasValue ? "Content-Length: " + length.Value + "\r\n" : "") + extra + "\r\n";
             byte[] bytes = Encoding.ASCII.GetBytes(header); stream.Write(bytes, 0, bytes.Length);
         }
         static void Send(NetworkStream stream, int code, string mime, byte[] body) { SendHeader(stream, code, mime, body.Length, ""); stream.Write(body, 0, body.Length); }
@@ -372,7 +398,7 @@ namespace StorageAtlas
                     List<Entry> children = node == null ? Roots : node.Folder ? node.Children : new List<Entry>();
                     List<Entry> selected = children.Where(e => Included(e, category)).OrderByDescending(e => Size(e, category)).ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase).ToList();
                     int offset = Number(query["offset"], 0, 0, Int32.MaxValue), limit = Number(query["limit"], 500, 1, 5000);
-                    return new { path = node == null ? "" : node.Path, name = node == null ? "All scanned locations" : node.Name, kind = node == null || node.Folder ? "folder" : "file", size = node == null ? Roots.Sum(e => Size(e, category)) : Size(node, category), fileCount = node == null ? Roots.Sum(e => FileCount(e, category)) : FileCount(node, category), folderCount = node == null ? FoldersCount : node.Folders, parent = node == null || node.Parent == null ? "" : node.Parent.Path, category = node == null || node.Folder ? null : Categories[node.Category], extension = node == null || node.Folder ? null : Extension(node.Name), children = selected.Skip(offset).Take(limit).Select(e => Item(e, category)).ToArray(), totalChildren = selected.Count, childrenSizeTotal = selected.Sum(e => Size(e, category)), remainingSize = selected.Skip(offset).Sum(e => Size(e, category)), offset = offset, limit = limit, state = State, revision = Revision };
+                    return new { path = node == null ? "" : node.Path, name = node == null ? "All scanned locations" : node.Name, kind = node == null || node.Folder ? "folder" : "file", size = node == null ? Roots.Sum(e => Size(e, category)) : Size(node, category), fileCount = node == null ? Roots.Sum(e => FileCount(e, category)) : FileCount(node, category), folderCount = node == null ? FoldersCount : node.Folders, parent = node == null || node.Parent == null ? "" : node.Parent.Path, category = node == null || node.Folder ? null : Categories[node.Category], extension = node == null || node.Folder ? null : Extension(node.Name), artwork = FolderArtwork(node), children = selected.Skip(offset).Take(limit).Select(e => Item(e, category)).ToArray(), totalChildren = selected.Count, childrenSizeTotal = selected.Sum(e => Size(e, category)), remainingSize = selected.Skip(offset).Sum(e => Size(e, category)), offset = offset, limit = limit, state = State, revision = Revision };
                 }
                 if (req.Path == "/api/search")
                 {
@@ -401,7 +427,12 @@ namespace StorageAtlas
         static bool Included(Entry e, int category) { return category < 0 || (e.Folder ? e.CategoryFiles[category] > 0 : e.Category == category); }
         static long Size(Entry e, int category) { return category < 0 ? e.Size : e.Folder ? e.CategorySizes[category] : e.Category == category ? e.Size : 0; }
         static long FileCount(Entry e, int category) { return category < 0 ? e.Files : e.Folder ? e.CategoryFiles[category] : e.Category == category ? 1 : 0; }
-        static object Item(Entry e, int category) { return new { path = e.Path, name = e.Name, kind = e.Folder ? "folder" : "file", size = Size(e, category), fileCount = FileCount(e, category), folderCount = e.Folders, category = e.Folder ? null : Categories[e.Category], extension = e.Folder ? null : Extension(e.Name), parent = e.Parent == null ? "" : e.Parent.Path }; }
+        static object Item(Entry e, int category)
+        {
+            var item = new Dictionary<string, object> { { "path", e.Path }, { "name", e.Name }, { "kind", e.Folder ? "folder" : "file" }, { "size", Size(e, category) }, { "fileCount", FileCount(e, category) }, { "folderCount", e.Folders }, { "category", e.Folder ? null : Categories[e.Category] }, { "extension", e.Folder ? null : Extension(e.Name) }, { "parent", e.Parent == null ? "" : e.Parent.Path } };
+            object artwork = FolderArtwork(e); if (artwork != null) item["artwork"] = artwork;
+            return item;
+        }
         static Entry FindEntry(string path)
         {
             Entry e; if (Folders.TryGetValue(path, out e)) return e;
@@ -433,12 +464,206 @@ namespace StorageAtlas
         }
         static Dictionary<string, object> GameRow(Game game, string name, string path, Entry node)
         {
-            var row = new Dictionary<string, object> { { "name", name }, { "path", path }, { "installationPath", game.Path }, { "size", node.Size }, { "source", game.Source }, { "files", node.Files } };
+            var row = new Dictionary<string, object> { { "name", name }, { "path", path }, { "installationPath", game.Path }, { "size", node.Size }, { "source", game.Source }, { "files", node.Files }, { "fileCount", node.Files }, { "folderCount", node.Folders } };
             if (game.SteamAppId != null) row["steamAppId"] = game.SteamAppId;
+            object artwork = ArtworkMetadata(game, path); if (artwork != null) row["artwork"] = artwork;
             string library = CustomLibraryForGame(game.Path); if (library != null) row["libraryPath"] = library;
             return row;
         }
         static object Overview() { return new { roots = Roots.OrderByDescending(r => r.Size).Select(r => Item(r, -1)).ToArray(), size = BytesCount, files = FilesCount, folders = FoldersCount, categories = CategorySummary(), games = GameSummary(), gameLibraries = GameLibraries.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray(), inactiveGameLibraries = InactiveGameLibraries.OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToArray(), extensions = ExtensionSummary(), warnings = SettingsWarning == null ? Warnings.ToArray() : Warnings.Concat(new[] { SettingsWarning }).ToArray(), warningCount = ErrorsCount + (SettingsWarning == null ? 0 : 1), state = State, id = ScanId, revision = Revision, sizeBasis = "logical file bytes", reparsePointsSkipped = true }; }
+
+        static Game SteamGameForPath(string path)
+        {
+            return Games.Values.Where(g => g.Source == "Steam manifest" && g.SteamAppId != null && Within(path, g.Path)).OrderByDescending(g => g.Path.Length).FirstOrDefault();
+        }
+        static object ArtworkMetadata(Game game, string path)
+        {
+            if (game.Source != "Steam manifest" || CanonicalSteamAppId(game.SteamAppId) == null) return null;
+            string prefix = "/api/game-artwork?path=" + Uri.EscapeDataString(path) + "&scan=" + ScanId + "&kind=";
+            return new { url = prefix + "hero", fallbackUrl = prefix + "capsule", source = "Steam library", steamAppId = game.SteamAppId };
+        }
+        static object FolderArtwork(Entry entry)
+        {
+            if (entry == null || !entry.Folder) return null;
+            Game game;
+            if (Games.TryGetValue(entry.Path, out game)) return ArtworkMetadata(game, entry.Path);
+            game = entry.Parent == null ? SteamGameForPath(entry.Path) : null;
+            return game == null ? null : ArtworkMetadata(game, entry.Path);
+        }
+        static ArtworkData GameArtwork(Request req)
+        {
+            Require(req, "GET"); var query = HttpUtility.ParseQueryString(req.Query);
+            foreach (string key in query.AllKeys) if ((key != "path" && key != "kind" && key != "scan") || query.GetValues(key).Length != 1) throw new HttpError(400, "Provide only one scanned path and hero or capsule kind.");
+            if (String.IsNullOrEmpty(query["path"])) throw new HttpError(400, "Provide a scanned game folder path.");
+            string kind = query["kind"] ?? "hero", appId; string[] localRoots;
+            if (kind != "hero" && kind != "capsule") throw new HttpError(400, "Choose hero or capsule artwork.");
+            lock (Gate)
+            {
+                if (query["scan"] != null && query["scan"] != ScanId) throw new HttpError(409, "The artwork request belongs to an earlier scan.");
+                Entry entry = GuardAction(Normalize(query["path"]), false);
+                Game game = entry.Folder ? SteamGameForPath(entry.Path) : null;
+                if (game == null) throw new HttpError(404, "This scanned folder has no recognized Steam artwork.");
+                appId = CanonicalSteamAppId(game.SteamAppId); localRoots = SteamArtworkRoots.ToArray();
+            }
+            ArtworkData image = CachedArtwork(appId, kind, localRoots);
+            if (image == null) throw new HttpError(404, "Steam artwork is unavailable for this game.");
+            return image;
+        }
+        static ArtworkData CachedArtwork(string appId, string kind, string[] roots)
+        {
+            string key = appId + "/" + kind; ArtworkEntry entry; bool load = false;
+            lock (ArtworkGate)
+            {
+                if (ArtworkCache.TryGetValue(key, out entry))
+                {
+                    entry.Used = DateTime.UtcNow;
+                    if (!entry.Loading && entry.Expires > DateTime.UtcNow) return entry.Data;
+                    if (!entry.Loading) { ArtworkCacheBytes -= entry.Data == null ? 0 : entry.Data.Bytes.Length; entry.Data = null; entry.Ready.Reset(); entry.Loading = load = true; }
+                }
+                else
+                {
+                    TrimArtworkCache(255, ArtworkCacheLimit);
+                    if (ArtworkCache.Count >= 256) throw new HttpError(503, "Artwork loading is busy. Try again later.");
+                    entry = new ArtworkEntry { Used = DateTime.UtcNow, Loading = true }; ArtworkCache.Add(key, entry); load = true;
+                }
+            }
+            if (!load)
+            {
+                if (!entry.Ready.Wait(25000)) throw new HttpError(503, "Artwork loading is busy. Try again later.");
+                return entry.Data;
+            }
+            ArtworkData data = null;
+            try
+            {
+                if (ArtworkDownloads.Wait(5000))
+                {
+                    try { data = LoadSteamArtwork(appId, kind, roots); } finally { ArtworkDownloads.Release(); }
+                }
+            }
+            finally
+            {
+                lock (ArtworkGate)
+                {
+                    entry.Data = data; entry.Expires = DateTime.UtcNow.AddMinutes(data == null ? 5 : 240); entry.Loading = false;
+                    ArtworkCacheBytes += data == null ? 0 : data.Bytes.Length; entry.Ready.Set(); TrimArtworkCache(256, ArtworkCacheLimit);
+                }
+            }
+            return data;
+        }
+        static void TrimArtworkCache(int count, long bytes)
+        {
+            foreach (var pair in ArtworkCache.Where(p => !p.Value.Loading).OrderBy(p => p.Value.Used).ToArray())
+            {
+                if (ArtworkCache.Count <= count && ArtworkCacheBytes <= bytes) break;
+                ArtworkCache.Remove(pair.Key); ArtworkCacheBytes -= pair.Value.Data == null ? 0 : pair.Value.Data.Bytes.Length;
+            }
+        }
+        static string ArtworkFilename(string kind) { return kind == "hero" ? "library_hero.jpg" : "library_600x900.jpg"; }
+        static ArtworkData LoadSteamArtwork(string appId, string kind, string[] roots)
+        {
+            string filename = ArtworkFilename(kind);
+            foreach (string root in roots)
+                foreach (string name in new[] { filename, System.IO.Path.ChangeExtension(filename, ".png") })
+                    foreach (string path in new[] { System.IO.Path.Combine(root, appId, name), System.IO.Path.Combine(root, appId + "_" + name) })
+                    {
+                        try
+                        {
+                            if (!SafeArtworkFile(path)) continue;
+                            using (FileStream stream = OpenArtworkFile(path)) { ArtworkData image = ReadArtwork(stream, null); if (image != null) return image; }
+                        }
+                        catch { }
+                    }
+#if !FILEGAZER_ARTWORK_TEST
+            foreach (string address in new[] { "https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/", "https://cdn.akamai.steamstatic.com/steam/apps/" })
+            {
+                try
+                {
+                    ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072;
+                    DateTime deadline = DateTime.UtcNow.AddSeconds(8);
+                    HttpWebRequest request = (HttpWebRequest)WebRequest.Create(address + appId + "/" + filename);
+                    request.AllowAutoRedirect = false; request.Timeout = 7000; request.ReadWriteTimeout = 1000; request.UserAgent = "FileGazer/1.1"; request.UseDefaultCredentials = false;
+                    using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                    {
+                        if (response.StatusCode != HttpStatusCode.OK || response.ContentLength > ArtworkLimit) continue;
+                        using (Stream stream = response.GetResponseStream()) { ArtworkData image = ReadArtwork(stream, deadline); if (image != null) return image; }
+                    }
+                }
+                catch { }
+            }
+#endif
+            return null;
+        }
+        static bool SafeArtworkFile(string path)
+        {
+            bool file = true;
+            for (string current = path; current != null; current = ParentPath(current))
+            {
+                uint attributes = Native.GetFileAttributes(LongPath(current));
+                if (attributes == UInt32.MaxValue || (attributes & Native.Reparse) != 0 || (file && (attributes & Native.Directory) != 0)) return false;
+                file = false;
+            }
+            return true;
+        }
+        static FileStream OpenArtworkFile(string path)
+        {
+            // Framework 4's string-path FileStream rejects extended paths. A native handle preserves long-path reads.
+            Microsoft.Win32.SafeHandles.SafeFileHandle handle = Native.CreateFile(LongPath(path), 0x80000000, 7, IntPtr.Zero, 3, 0x08000000 | 0x00200000, IntPtr.Zero);
+            if (handle.IsInvalid) { int error = Marshal.GetLastWin32Error(); handle.Dispose(); throw new System.ComponentModel.Win32Exception(error); }
+            try { return new FileStream(handle, FileAccess.Read, 8192, false); } catch { handle.Dispose(); throw; }
+        }
+        static ArtworkData ReadArtwork(Stream stream, DateTime? deadline)
+        {
+            using (MemoryStream data = new MemoryStream())
+            {
+                byte[] buffer = new byte[8192]; int read;
+                while (true) { if (deadline.HasValue && DateTime.UtcNow > deadline.Value) return null; read = stream.Read(buffer, 0, buffer.Length); if (read == 0) break; if (data.Length + read > ArtworkLimit) return null; data.Write(buffer, 0, read); }
+                byte[] bytes = data.ToArray(); string mime;
+                if (bytes.Length >= 8 && bytes[0] == 137 && bytes[1] == 80 && bytes[2] == 78 && bytes[3] == 71 && bytes[4] == 13 && bytes[5] == 10 && bytes[6] == 26 && bytes[7] == 10) mime = "image/png";
+                else if (bytes.Length >= 3 && bytes[0] == 255 && bytes[1] == 216 && bytes[2] == 255) mime = "image/jpeg";
+                else return null;
+                data.Position = 0;
+                try
+                {
+                    using (System.Drawing.Image image = System.Drawing.Image.FromStream(data, false, false))
+                    {
+                        if (image.Width < 1 || image.Height < 1 || image.Width > 8192 || image.Height > 8192 || (long)image.Width * image.Height > 32000000) return null;
+                        if (Math.Max(image.Width, image.Height) > 1024) return ResizeArtwork(image, mime);
+                    }
+                }
+                catch { return null; }
+                return new ArtworkData { Bytes = bytes, Mime = mime };
+            }
+        }
+        static ArtworkData ResizeArtwork(System.Drawing.Image image, string mime)
+        {
+            double scale = 1024.0 / Math.Max(image.Width, image.Height);
+            int width = Math.Max(1, (int)Math.Round(image.Width * scale)), height = Math.Max(1, (int)Math.Round(image.Height * scale));
+            using (Bitmap bitmap = new Bitmap(width, height, mime == "image/png" ? System.Drawing.Imaging.PixelFormat.Format32bppArgb : System.Drawing.Imaging.PixelFormat.Format24bppRgb))
+            using (Graphics graphics = Graphics.FromImage(bitmap))
+            using (MemoryStream output = new MemoryStream())
+            {
+                graphics.CompositingMode = System.Drawing.Drawing2D.CompositingMode.SourceCopy;
+                graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+                graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                using (System.Drawing.Imaging.ImageAttributes attributes = new System.Drawing.Imaging.ImageAttributes())
+                {
+                    attributes.SetWrapMode(System.Drawing.Drawing2D.WrapMode.TileFlipXY);
+                    graphics.DrawImage(image, new Rectangle(0, 0, width, height), 0, 0, image.Width, image.Height, GraphicsUnit.Pixel, attributes);
+                }
+                if (mime == "image/png") bitmap.Save(output, System.Drawing.Imaging.ImageFormat.Png);
+                else
+                {
+                    System.Drawing.Imaging.ImageCodecInfo codec = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders().First(c => c.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
+                    using (System.Drawing.Imaging.EncoderParameters parameters = new System.Drawing.Imaging.EncoderParameters(1))
+                    {
+                        parameters.Param[0] = new System.Drawing.Imaging.EncoderParameter(System.Drawing.Imaging.Encoder.Quality, 85L);
+                        bitmap.Save(output, codec, parameters);
+                    }
+                }
+                return output.Length > ArtworkLimit ? null : new ArtworkData { Bytes = output.ToArray(), Mime = mime };
+            }
+        }
 
         static void LoadGameLibraries()
         {
@@ -614,6 +839,15 @@ namespace StorageAtlas
         static object FileAction(Request req)
         {
             Dictionary<string, object> body = ActionBody(req);
+            if (req.Path == "/api/properties")
+            {
+                string propertyPath = Normalize(BodyString(body, "path"));
+                lock (Gate) GuardAction(propertyPath, false);
+                // Shell handlers may display modeless UI or wait on their own modal UI. Do not hold inventory access.
+                try { RunShellThread(delegate { Native.ShowProperties(propertyPath); }); }
+                catch (Exception ex) { throw new HttpError(400, "Windows could not show properties: " + ex.Message); }
+                return new { opened = true };
+            }
             lock (Gate)
             {
                 if (req.Path == "/api/recycle") return Recycle(body);
@@ -627,12 +861,6 @@ namespace StorageAtlas
                     if ("|.exe|.com|.bat|.cmd|.ps1|.psm1|.psd1|.vbs|.vbe|.js|.jse|.wsf|.wsh|.msc|.scr|.pif|.cpl|.msi|.msp|.mst|.reg|.lnk|.url|.application|.appref-ms|.gadget|.hta|.inf|.jar|.py|.pyw|.sh|.bash|.zsh|.rb|.pl|.php|.dll|.sys|.ocx|.appx|.msix|.appxbundle|.msixbundle|.sct|.scf|".Contains("|" + extension + "|")) throw new HttpError(403, "Executable, script, installer, and shortcut files must be opened manually in File Explorer.");
                     try { RunSta(delegate { Process.Start(new ProcessStartInfo(path) { UseShellExecute = true, Verb = "open", WorkingDirectory = ParentPath(path) }); return true; }); }
                     catch (Exception ex) { throw new HttpError(400, "Windows could not open this file: " + ex.Message); }
-                    return new { opened = true };
-                }
-                if (req.Path == "/api/properties")
-                {
-                    try { RunSta(delegate { Native.ShowProperties(path); return true; }); }
-                    catch (Exception ex) { throw new HttpError(400, "Windows could not show properties: " + ex.Message); }
                     return new { opened = true };
                 }
                 string name = BodyString(body, "name");
@@ -652,6 +880,40 @@ namespace StorageAtlas
             Thread thread = new Thread(delegate() { try { result = action(); } catch (Exception ex) { error = ex; } }) { IsBackground = true };
             thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
             if (error != null) throw error; return result;
+        }
+        static void RunShellThread(Action action)
+        {
+            Control dispatcher;
+            lock (ShellGate)
+            {
+                if (ShellDispatcher == null || ShellDispatcher.IsDisposed)
+                {
+                    Exception initializationError = null;
+                    using (ManualResetEvent ready = new ManualResetEvent(false))
+                    {
+                        Thread thread = new Thread(delegate()
+                        {
+                            Control control = null;
+                            try { control = new Control(); IntPtr handle = control.Handle; ShellDispatcher = control; }
+                            catch (Exception ex) { initializationError = ex; }
+                            finally { ready.Set(); }
+                            if (initializationError != null) return;
+                            try { Application.Run(); } finally { control.Dispose(); }
+                        }) { IsBackground = true, Name = "File Gazer properties" };
+                        thread.SetApartmentState(ApartmentState.STA); thread.Start(); ready.WaitOne();
+                    }
+                    if (initializationError != null) throw initializationError;
+                }
+                dispatcher = ShellDispatcher;
+            }
+            if (!dispatcher.InvokeRequired) { action(); return; }
+            Exception error = null;
+            using (ManualResetEvent complete = new ManualResetEvent(false))
+            {
+                dispatcher.BeginInvoke((MethodInvoker)delegate { try { action(); } catch (Exception ex) { error = ex; } finally { complete.Set(); } });
+                complete.WaitOne();
+            }
+            if (error != null) throw error;
         }
         static void ValidateName(string name)
         {
@@ -908,6 +1170,8 @@ namespace StorageAtlas
         {
             try
             {
+                string parent = ParentPath(Normalize(steamapps));
+                if (parent != null) lock (Gate) SteamArtworkRoots.Add(System.IO.Path.Combine(parent, "appcache", "librarycache"));
                 foreach (string manifest in Directory.EnumerateFiles(steamapps, "appmanifest_*.acf"))
                 {
                     if (Cancel) break;
@@ -1008,6 +1272,7 @@ namespace StorageAtlas
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetFileAttributesW")] internal static extern uint GetFileAttributes(string path);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetFullPathNameW")] internal static extern uint GetFullPathName(string path, uint bufferLength, StringBuilder buffer, IntPtr filePart);
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "MoveFileW")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool MoveFile(string existing, string destination);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "CreateFileW")] internal static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         internal struct ShellExecuteInfo
         {
@@ -1021,10 +1286,18 @@ namespace StorageAtlas
             internal IntPtr ClassKey; internal uint HotKey; internal IntPtr Icon, Process;
         }
         [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "ShellExecuteExW")] [return: MarshalAs(UnmanagedType.Bool)] static extern bool ShellExecuteEx(ref ShellExecuteInfo info);
+#if FILEGAZER_SHELL_TEST
+        internal static Action PropertiesObserver;
+#endif
         internal static void ShowProperties(string path)
         {
+#if FILEGAZER_SHELL_TEST
+            if (Thread.CurrentThread.GetApartmentState() != ApartmentState.STA || !Application.MessageLoop) throw new Exception("Properties requires a persistent STA message loop.");
+            if (PropertiesObserver != null) PropertiesObserver();
+#else
             ShellExecuteInfo info = new ShellExecuteInfo { Size = Marshal.SizeOf(typeof(ShellExecuteInfo)), Mask = 0x0000000c | 0x00000100, Verb = "properties", File = path, Show = 1 };
             if (!ShellExecuteEx(ref info)) throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+#endif
         }
     }
 
